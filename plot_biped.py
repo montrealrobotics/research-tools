@@ -1,345 +1,119 @@
-
-
 """
 sudo pip3 install pandas
 sudo pip3 install seaborn
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'cleanrl', 'plotting'))
+from make_plots import render_plot, colors, linestyle
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns; sns.set(font_scale=1.2)
-import pdb
 
-colors = {'SMiRL (ours)': 'k',
-          'SMiRL VAE (ours)': 'purple',
-          'ICM': 'b',
-          'RND': 'orange',
-          'Oracle': 'g',
-          'Reward + SMiRL (ours)' : 'k',
-          'Reward + ICM' : 'b',
-          'Reward': 'r',
-          'SMiRL + ICM': 'brown',
-         }
-linestyle = {'SMiRL (ours)': '-',
-          'ICM': '-',
-          'RND': '--',
-          'Oracle': '--',
-          'SMiRL VAE (ours)': '--',
-          'Reward + SMiRL (ours)' : '-',
-          'Reward + ICM' : '-',
-          'Reward': '--',
-          'SMiRL + ICM': '-',
-         }
-def plotsns_smoothed(ax, s, df, label, title=None, ylabel=None, res=1):
-    data = list(df[s])
-    s = s.split('/')[-1]
-    data = pd.DataFrame([(i//res*res, data[i]) for i in range(len(data))])
-    data = data.rename(columns={1: s, 0: 'Episodes'})
-    ax = sns.lineplot(x='Episodes', y=s, data=data, label=label, ax=ax, legend=False,  c=colors[label])
+# Extend the shared dicts with biped-specific labels
+colors.update({
+    'SMiRL (ours)': 'k',
+    'SMiRL VAE (ours)': 'purple',
+    'ICM': 'b',
+    'RND': 'orange',
+    'Oracle': 'g',
+    'Reward + SMiRL (ours)': 'k',
+    'Reward + ICM': 'b',
+    'Reward': 'r',
+    'SMiRL + ICM': 'brown',
+})
+linestyle.update({
+    'SMiRL (ours)': '-',
+    'SMiRL VAE (ours)': '--',
+    'ICM': '-',
+    'RND': '--',
+    'Oracle': '--',
+    'Reward + SMiRL (ours)': '-',
+    'Reward + ICM': '-',
+    'Reward': '--',
+    'SMiRL + ICM': '-',
+})
 
-    if title is not None:
-        ax.set_title(title)
-    else:
-        ax.set_title(s)
 
-    if ylabel is not None:
-        ax.set_ylabel(ylabel)
+def get_biped_data_frame(df, row_indices, col_name, res=5, step_size=20000, invert=False):
+    """Load and smooth rows from the biped CSV into a tidy DataFrame.
 
-def plotsns(ax, s, df, label, title=None, ylabel=None, res=1):
-    data = list(df[s])
-    data = (np.cumsum(data)[res:]-np.cumsum(data)[:-res]) / res
-    s = s.split('/')[-1]
-    data = pd.DataFrame([(i, data[i]) for i in range(len(data))])
-    data = data.rename(columns={1: s, 0: 'Episodes'})
-    ax = sns.lineplot(x='Episodes', y=s, data=data, label=label, ax=ax, legend=False, c=colors[label])
-    #print(ax.lines)
+    :param df:           pandas DataFrame loaded from safe.csv
+    :param row_indices:  list of row indices (df.iloc[i]) to concatenate as seeds
+    :param col_name:     name to give the value column
+    :param res:          smoothing window size
+    :param step_size:    env steps between each data point
+    :param invert:       if True, compute (1 - value) before smoothing (for fall rates)
+    """
+    data = []
+    for row_idx in row_indices:
+        bf = np.array([float(x) for x in list(df.iloc[row_idx][1:])])
+        if invert:
+            bf = 1.0 - bf
+        bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res]) / res
+        time = step_size
+        for val in bf:
+            data.append((time, float(val)))
+            time += step_size
+    result = pd.DataFrame(data)
+    result = result.rename(columns={0: 'Steps', 1: col_name})
+    return result
+
+
+def add_biped_plot(ax, df, row_indices, col_name, label, res=5, step_size=20000, invert=False):
+    """Plot one condition from the biped CSV onto *ax*.
+
+    :param ax:          matplotlib Axes
+    :param df:          pandas DataFrame loaded from safe.csv
+    :param row_indices: list of row indices to use as seeds
+    :param col_name:    intermediate column name for the tidy DataFrame
+    :param label:       legend label (must be a key in colors/linestyle)
+    :param res:         smoothing window
+    :param step_size:   env steps between data points
+    :param invert:      compute (1 - value) first, for fall-rate data
+    """
+    plot_data = get_biped_data_frame(df, row_indices, col_name, res=res,
+                                     step_size=step_size, invert=invert)
+    sns.lineplot(data=plot_data, x='Steps', y=col_name, ax=ax,
+                 label=label, c=colors[label])
     ax.lines[-1].set_linestyle(linestyle[label])
-    #print(\label\, label,linestyle[label] )
-    if title is not None:
-        ax.set_title(title)
-    else:
-        ax.set_title(s)
 
-    if ylabel is not None:
-        ax.set_ylabel(ylabel)
-        
-    ax.ticklabel_format(axis= 'x', style='sci', scilimits=(0,3))
-    #ax.set_xticklabels(ax.get_xticklabels(), fontsize=7)
-def save(fname):
-    plt.show()
-    '''
-    plt.savefig('{}.png'.format(fname))
-    plt.clf()
-    '''
-        
+
 if __name__ == '__main__':
 
-    fig, (ax3) = plt.subplots(1, 1, figsize=(20/3.,5))
-    #*******************************************************************************
-    #####################
-    ##### Stability #####
-    #####################
-    #*******************************************************************************
-    
-    datadir = './safe.csv'
-    df = pd.read_csv(datadir)
-    ax3.set_title('Walk task: % Episodes w/ Falls')
-    
-    #####################
-    ##### w/ SMiRL ######
-    #####################
-    
-    biped_falls = []
+    df = pd.read_csv('./safe.csv')
     res = 5
-    bf = list(df.iloc[15][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[16][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Falls', 0: 'Steps'})
-    label='Reward + SMiRL (ours)'
-    sns.lineplot(data=bf, x='Steps', y='Biped Falls', ax=ax3, label='Reward + SMiRL (ours)', c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    
-    # #####################
-    # ##### w/ ICM ######
-    # #####################
-    
-    biped_falls = []
-    res = 5
-    
-    bf = list(df.iloc[20][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[21][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-        
-    bf = list(df.iloc[22][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Falls', 0: 'Steps'})
-    label='Reward + ICM'
-    sns.lineplot(data=bf, x='Steps', y='Biped Falls', ax=ax3, label='Reward + ICM', c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    #####################
-    ###### Vanilla ######
-    #####################
-    
-    biped_falls = []
-    res = 5
-    
-    bf = list(df.iloc[11][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[12][1:])
-    bf = 1 - np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Falls', 0: 'Steps'})
-    
-    # Move colors (true reward should be 5)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    label='Reward'
-    sns.lineplot(data=bf, x='Steps', y='Biped Falls', ax=ax3, label='Reward', ci=0.,c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    ax3.ticklabel_format(axis= 'x', style='sci', scilimits=(0,3))
-    
-    
-    ax3.set(ylabel='% Episodes w/ Falls')
-    ax3.set(xlabel='Env Steps')
-    ax3.legend()
-    '''
-    handles, labels = ax2.get_legend_handles_labels()
-    plt.figlegend(handles, labels, ncol=5, mode='expand', bbox_to_anchor=(.37,.03,.3,.1))
-    '''
-    #plt.subplots_adjust(bottom=.25, wspace=.25)
-    plt.show()
-    fig.savefig("file0"+".svg")
-    fig.savefig("file0"+".png")
 
-    fig, (ax3) = plt.subplots(1, 1, figsize=(20/3.,5))
-    #*******************************************************************************
-    #####################
-    ##### Stability #####
-    #####################
-    #*******************************************************************************
-    
-    datadir = './safe.csv'
-    df = pd.read_csv(datadir)
-    ax3.set_title('Walk task: Walk Reward')
-    
-    #####################
-    ##### w/ SMiRL ######
-    #####################
-    
-    biped_falls = []
-    res = 5
-    
-    bf = list(df.iloc[25][1:])
-    bf =  np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[26][1:])
-    bf = np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[27][1:])
-    bf = np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-        
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Reward + SMiRL', 0: 'Steps'})
-    label='Reward + SMiRL (ours)'
-    sns.lineplot(data=bf, x='Steps', y='Biped Reward + SMiRL', ax=ax3, label='Reward + SMiRL (ours)', c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    #####################
-    ##### w/ ICM ######
-    #####################
-    
-    biped_falls = []
-    res = 5
-    
-    bf = list(df.iloc[37][1:])
-    bf =  np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[38][1:])
-    bf = np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[39][1:])
-    bf = np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-        
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Reward + ICM', 0: 'Steps'})
-    label='Reward + ICM'
-    sns.lineplot(data=bf, x='Steps', y='Biped Reward + ICM', ax=ax3, label='Reward + ICM', c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    
-    #####################
-    ###### Vanilla ######
-    #####################
-    
-    biped_falls = []
-    res = 5
-    
-    bf = list(df.iloc[29][1:])
-    bf = np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = list(df.iloc[30][1:])
-    bf =  np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    bf = list(df.iloc[31][1:])
-    bf =  np.array([float(x) for x in bf])
-    bf = (np.cumsum(bf)[res:] - np.cumsum(bf)[:-res])/res
-    time = 20000
-    for val in bf:
-        biped_falls.append((time, float(val)))
-        time += 20000
-    
-    bf = pd.DataFrame(biped_falls)
-    bf = bf.rename(columns={1: 'Biped Reward', 0: 'Steps'})
-    
-    # Move colors (true reward should be 5)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    # sns.lineplot(data=[], x=None, y=None, ax=ax3)
-    label='Reward'
-    sns.lineplot(data=bf, x='Steps', y='Biped Reward', ax=ax3, label='Reward',ci=0., c=colors[label])
-    ax3.lines[-1].set_linestyle(linestyle[label])
-    
-    ax3.ticklabel_format(axis= 'x', style='sci', scilimits=(0,3))
-    ax3.set_xlim(0, 2e6)
-    
-    ax3.set(ylabel='r_walk')
-    ax3.set(xlabel='Env Steps')
-    ax3.legend()
-    '''
-    handles, labels = ax2.get_legend_handles_labels()
-    plt.figlegend(handles, labels, ncol=5, mode='expand', bbox_to_anchor=(.37,.03,.3,.1))
-    '''
-    #plt.subplots_adjust(bottom=.25, wspace=.25)
-    plt.show()
-    fig.savefig("file1"+".svg")
-    fig.savefig("file1"+".png")
- 
+    # -------------------------------------------------------------------------
+    # Figure 0 — Walk task: % Episodes w/ Falls
+    # -------------------------------------------------------------------------
+    fig, ax = plt.subplots(1, 1, figsize=(20 / 3., 5))
+
+    add_biped_plot(ax, df, row_indices=[15, 16],        col_name='Biped Falls',
+                   label='Reward + SMiRL (ours)', res=res, invert=True)
+    add_biped_plot(ax, df, row_indices=[20, 21, 22],    col_name='Biped Falls',
+                   label='Reward + ICM',           res=res, invert=True)
+    add_biped_plot(ax, df, row_indices=[11, 12],        col_name='Biped Falls',
+                   label='Reward',                 res=res, invert=True)
+
+    render_plot(ax, fig, title='Walk task: % Episodes w/ Falls',
+                ylabel='% Episodes w/ Falls', xlabel='Env Steps', outpath='file0')
+
+    # -------------------------------------------------------------------------
+    # Figure 1 — Walk task: Walk Reward
+    # -------------------------------------------------------------------------
+    fig, ax = plt.subplots(1, 1, figsize=(20 / 3., 5))
+
+    add_biped_plot(ax, df, row_indices=[25, 26, 27],    col_name='Biped Reward + SMiRL',
+                   label='Reward + SMiRL (ours)', res=res, invert=False)
+    add_biped_plot(ax, df, row_indices=[37, 38, 39],    col_name='Biped Reward + ICM',
+                   label='Reward + ICM',           res=res, invert=False)
+    add_biped_plot(ax, df, row_indices=[29, 30, 31],    col_name='Biped Reward',
+                   label='Reward',                 res=res, invert=False)
+
+    ax.set_xlim(0, 2e6)
+    render_plot(ax, fig, title='Walk task: Walk Reward',
+                ylabel='r_walk', xlabel='Env Steps', outpath='file1')
